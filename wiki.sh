@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Read wiki articles in your favorite text editor or via `less` or `more`.
-# 2017-02-11 by Steffen Sauler
+# 2017-02 by Steffen Sauler
 
 #### SETTINGS ####
 
@@ -12,9 +12,12 @@ DOMAIN="wikipedia.org"
 QUERY="/w/api.php?action=query&titles=ARTICLE&prop=revisions&rvprop=content&format=xml"
 
 TMP_FOLDER="/tmp"
-CACHE="${TMP_FOLDER}/wikish"
-# By default files are cached under /tmp/wikish/articlename-lang-2017-02-11 
 
+# By default files are cached under /tmp/wikish/articlename-lang-2017-02-11 
+CACHE="${TMP_FOLDER}/wikish"
+
+# Line width
+WIDTH=100
 #### /SETTINGS ####
 
 USAGE=\
@@ -25,7 +28,8 @@ USAGE=\
         -n, --nocache   Disable article caching (not recommended)\n\
         -r, --raw       Display raw article instead of cleaned up one\n\
         -o, --onlydl    Only download, don't display. Useful to read cached article later\n\
-        -n, --nofollow  Don't follow redirects automatically"
+        -n, --nofollow  Don't follow redirects automatically
+        -w, --linewidth integer for line width (default: 100)"
 
 debug()
 {
@@ -49,6 +53,11 @@ then
 fi
 ARTICLE=$1
 shift
+
+if [[ $ARTICLE == "random" || $ARTICLE == "r" ]]
+then
+    ARTICLE=$(curl -s "https://en.wikipedia.org/w/api.php?action=query&list=random&rnlimit=1&rnnamespace=0&format=xml" | grep -Po "(?<=title\=\").*?(?=\")")
+fi
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]
@@ -79,6 +88,10 @@ do
         -o|--onlydl)
         ONLY_DL=1
         shift
+        ;;
+        -w|--linewidth)
+        if [[ $2 =~ ^-?[0-9]+$ ]]; then WIDTH=$2; fi
+        shift 2
         ;;
         *)
         echo -e "$USAGE"
@@ -118,26 +131,32 @@ download_cmd()
 
 cleanup()
 {
-    # Removal of all lines containing curly braces
-    CONTENT=$(printf "%s" "${CONTENT}" | sed '/{{.*/d')
+    # Removal of all lines beginning with curly braces
+    CONTENT=$(echo -e "${CONTENT}" | sed '/^{{.*/d')
+    
+    # Removal of renamed linked article
+    #CONTENT=$(echo -e  "${CONTENT}" | sed 's/\[[a-zA-Z\s]*\|([a-zA-Z\s]*\)/\1/')
     
     # Removal of linked article
-    CONTENT=$(printf "%s" "${CONTENT}" | sed 's#|\w+]]'##g)
+    CONTENT=$(echo -e "${CONTENT}" | sed 's#|\w+]]'##g)
     
     # Removal of [[ and ]]
-    CONTENT=$(printf "%s" "${CONTENT}" | sed 's/\[\[//g' | sed 's/\]\]//g')
+    CONTENT=$(echo -e "${CONTENT}" | sed 's/\[\[//g' | sed 's/\]\]//g')
     
     # Replacement of multiple ''' by simple '
-    CONTENT=$(printf "%s" "${CONTENT}" | sed "s/'''/'/g")
-    
-    return
+    CONTENT=$(echo -e "${CONTENT}" | sed "s/'''/'/g")
+ 
+    # Replacement &quot; with ',  &lt; with <, &gt; with >
+    CONTENT=$(echo -e "${CONTENT}" | sed "s/\&quot;/'/g" | sed "s/\&lt;/</g" | sed "s/\&gt;/>/g" )  
 }
 
 get_article()
 {
     # Assemble download URL and cache file location
+    # Escape space and apostrophe
     ESC_ARTICLE=${ARTICLE// /%20}
-    
+    ESC_ARTICLE=${ESC_ARTICLE//\'/%27}
+
     #Remove round brackets from filename
     ESC_FILENAME=$(echo "$ESC_ARTICLE" | sed 's/(//' | sed 's/)//')
 
@@ -161,7 +180,7 @@ get_article()
         debug "Article already cached."
     fi
     
-    CONTENT=$(cat "${CACHE_FILE}" | grep -Pazo "(?s)(?<=preserve\">).*?(?=<\/rev>)")
+    CONTENT=$(cat -s "${CACHE_FILE}" | grep -Pazo "(?s)(?<=preserve\">).*?(?=<\/rev>)")
     debug "Content starts with ${CONTENT:0:10}"
 
 }
@@ -197,5 +216,7 @@ fi
 
 if [[ ! ${ONLY_DL} -eq 1 ]]
 then
-    printf "%s\n" "${CONTENT}"
+    echo -e "You are reading article $ARTICLE from ${LANG}.${DOMAIN}"
+    echo -e "#########################################################"
+    echo -e "${CONTENT}\n" | fmt -w $WIDTH
 fi
